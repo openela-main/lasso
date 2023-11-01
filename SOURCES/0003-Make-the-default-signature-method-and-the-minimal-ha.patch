@@ -1,0 +1,363 @@
+From f095ac8f5740b6eee687cac97840bc7e72992999 Mon Sep 17 00:00:00 2001
+From: Jakub Hrozek <jhrozek@redhat.com>
+Date: Mon, 7 Jun 2021 12:27:15 +0200
+Subject: [PATCH 3/7] Make the default signature method and the minimal hash
+ strength configurable (#54037)
+
+Adds two new configure options:
+    --with-default-sign-algo
+    --min-hash-algo
+
+--with-default-sign-algo sets the default signing algorithm and defaults
+to rsa-sha1. At the moment, two algorithms are supported: rsa-sha1 and
+rsa-sha256.
+
+--min-hash-algo sets the minimum hash algorithm to be accepted. The
+default is sha1 for backwards compatibility as well.
+
+Related:
+https://dev.entrouvert.org/issues/54037
+---
+ configure.ac         | 42 +++++++++++++++++++++++++++++
+ lasso/id-ff/server.c |  2 +-
+ lasso/id-ff/server.h |  2 ++
+ lasso/lasso.c        | 51 +++++++++++++++++++++++++++++++++++
+ lasso/xml/tools.c    | 63 +++++++++++++++++++++++++++++++++++---------
+ lasso/xml/xml.c      | 24 +++++++++++++++++
+ lasso/xml/xml.h      |  9 +++++++
+ tests/random_tests.c |  6 ++---
+ 8 files changed, 182 insertions(+), 17 deletions(-)
+
+diff --git a/configure.ac b/configure.ac
+index b527def43..2cdfbb149 100644
+--- a/configure.ac
++++ b/configure.ac
+@@ -795,6 +795,43 @@ else
+     AC_MSG_RESULT(no)
+ fi 
+ 
++AC_ARG_WITH([default-sign-algo],
++            [AS_HELP_STRING([--with-default-sign-algo=[rsa-sha1|rsa-sha256]],
++                            [Default signing algorithm (rsa-sha1)]
++                           )
++            ]
++)
++
++SIGNING_ALGO=rsa-sha1
++if test x"$with_default_sign_algo" != x; then
++    if test ! "$with_default_sign_algo" = "rsa-sha1" -a ! "$with_default_sign_algo" = "rsa-sha256"; then
++	AC_MSG_ERROR("Default signing algorithm must be either rsa-sha1 or rsa-sha256")
++    else
++	SIGNING_ALGO=$with_default_sign_algo
++    fi
++fi
++
++AC_DEFINE_UNQUOTED(DEFAULT_SIGNING_ALGO, "$SIGNING_ALGO", ["The default signing algorithm"])
++
++AC_ARG_WITH([min-hash-algo],
++            [AS_HELP_STRING([--with-min-hash-algo=[sha1|sha256|sha384|sha512]],
++                            [Minimal allowed hash algorithm (rsa-sha1)]
++                           )
++            ]
++)
++
++MIN_HASH_ALGO=sha1
++if test x"$with_min_hash_algo" != x; then
++    if test ! "$with_min_hash_algo" = "sha1" -a ! "$with_min_hash_algo" = "sha256" -a ! "$with_min_hash_algo" = "sha384" -a ! "$with_min_hash_algo" = "sha512"; then
++	AC_MSG_ERROR("Minimal allowed hash algorithm must be one of sha1, sha256, sha384 or sha512)
++    else
++	MIN_HASH_ALGO=$with_min_hash_algo
++    fi
++fi
++
++AC_DEFINE_UNQUOTED(MIN_HASH_ALGO, "$MIN_HASH_ALGO", ["The minimal hash algorithm"])
++
++
+ dnl ==========================================================================
+ dnl Pedantic compilation
+ dnl ==========================================================================
+@@ -939,4 +976,9 @@ Python binding:         ${enable_python}
+ 
+ C API references:       ${enable_gtk_doc}
+ Tests suite:            ${enable_tests}
++
++Crypto settings
++---------------
++Default signature:      ${SIGNING_ALGO}
++Minimal accepted hash:  ${MIN_HASH_ALGO}
+ )
+diff --git a/lasso/id-ff/server.c b/lasso/id-ff/server.c
+index 08bbde833..2bf5b7a8c 100644
+--- a/lasso/id-ff/server.c
++++ b/lasso/id-ff/server.c
+@@ -682,7 +682,7 @@ instance_init(LassoServer *server)
+ 	server->private_key = NULL;
+ 	server->private_key_password = NULL;
+ 	server->certificate = NULL;
+-	server->signature_method = LASSO_SIGNATURE_METHOD_RSA_SHA1;
++	server->signature_method = lasso_get_default_signature_method();
+ 
+ 	server->services = g_hash_table_new_full(g_str_hash, g_str_equal,
+ 			(GDestroyNotify)g_free,
+diff --git a/lasso/id-ff/server.h b/lasso/id-ff/server.h
+index 8b4192793..5f9022e9d 100644
+--- a/lasso/id-ff/server.h
++++ b/lasso/id-ff/server.h
+@@ -133,6 +133,8 @@ LASSO_EXPORT gchar *lasso_server_get_endpoint_url_by_id(const LassoServer *serve
+ LASSO_EXPORT GList *lasso_server_get_filtered_provider_list(const LassoServer *server,
+ 	LassoProviderRole role, LassoMdProtocolType protocol_type, LassoHttpMethod http_method);
+ 
++LASSO_EXPORT LassoSignatureMethod lasso_get_default_signature_method();
++void lasso_set_default_signature_method(LassoSignatureMethod meth);
+ 
+ #ifdef __cplusplus
+ }
+diff --git a/lasso/lasso.c b/lasso/lasso.c
+index 087485998..67340317d 100644
+--- a/lasso/lasso.c
++++ b/lasso/lasso.c
+@@ -149,6 +149,44 @@ lasso_xmlsec_errors_callback(const char *file G_GNUC_UNUSED, int line G_GNUC_UNU
+ 	g_log("libxmlsec", G_LOG_LEVEL_DEBUG, "libxmlsec: %s:%d:%s:%s:%s:%s:%s", file, line, func, errorObject, errorSubject, xmlSecErrorsGetMsg(reason), msg);
+ }
+ 
++static int
++set_default_signature_method()
++{
++	int rv = LASSO_ERROR_UNDEFINED;
++
++	if (lasso_strisequal(DEFAULT_SIGNING_ALGO, "rsa-sha256")) {
++		lasso_set_default_signature_method(LASSO_SIGNATURE_METHOD_RSA_SHA256);
++		rv = 0;
++	} else if (lasso_strisequal(DEFAULT_SIGNING_ALGO, "rsa-sha1")) {
++		lasso_set_default_signature_method(LASSO_SIGNATURE_METHOD_RSA_SHA1);
++		rv = 0;
++	}
++
++	return rv;
++}
++
++static int
++set_min_allowed_hash_algo()
++{
++	int rv = LASSO_ERROR_UNDEFINED;
++
++	if (lasso_strisequal(MIN_HASH_ALGO, "sha1")) {
++		lasso_set_min_signature_method(LASSO_SIGNATURE_METHOD_RSA_SHA1);
++		rv = 0;
++	} else if (lasso_strisequal(MIN_HASH_ALGO, "sha256")) {
++		lasso_set_min_signature_method(LASSO_SIGNATURE_METHOD_RSA_SHA256);
++		rv = 0;
++	} else if (lasso_strisequal(MIN_HASH_ALGO, "sha384")) {
++		lasso_set_min_signature_method(LASSO_SIGNATURE_METHOD_RSA_SHA384);
++		rv = 0;
++	} else if (lasso_strisequal(MIN_HASH_ALGO, "sha512")) {
++		lasso_set_min_signature_method(LASSO_SIGNATURE_METHOD_RSA_SHA512);
++		rv = 0;
++	}
++
++	return rv;
++}
++
+ /**
+  * lasso_init:
+  *
+@@ -164,6 +202,19 @@ int lasso_init()
+ 	g_type_init();
+ #endif
+ 
++	/* Set the default hash algo */
++	if (set_default_signature_method() != 0) {
++		message(G_LOG_LEVEL_CRITICAL, "Unsupported signature "
++			"algorithm "DEFAULT_SIGNING_ALGO" configured");
++		return LASSO_ERROR_UNDEFINED;
++	}
++	if (set_min_allowed_hash_algo() != 0) {
++		message(G_LOG_LEVEL_CRITICAL, "Unsupported hash algorithm "
++			"algorithm "MIN_HASH_ALGO" configured");
++		return LASSO_ERROR_UNDEFINED;
++	}
++
++
+ 	/* Init Lasso classes */
+ 	for (i=0; functions[i]; i++)
+ 		functions[i]();
+diff --git a/lasso/xml/tools.c b/lasso/xml/tools.c
+index 290fd55f2..ce322ee1f 100644
+--- a/lasso/xml/tools.c
++++ b/lasso/xml/tools.c
+@@ -1505,16 +1505,6 @@ lasso_saml_constrain_dsigctxt(xmlSecDSigCtxPtr dsigCtx) {
+ 			(xmlSecDSigCtxEnableSignatureTransform(dsigCtx, xmlSecTransformExclC14NWithCommentsId) < 0) ||
+ 			(xmlSecDSigCtxEnableSignatureTransform(dsigCtx, xmlSecTransformInclC14N11Id) < 0) ||
+ 			(xmlSecDSigCtxEnableSignatureTransform(dsigCtx, xmlSecTransformInclC14N11WithCommentsId) < 0) ||
+-			(xmlSecDSigCtxEnableSignatureTransform(dsigCtx, xmlSecTransformSha1Id) < 0) ||
+-			(xmlSecDSigCtxEnableSignatureTransform(dsigCtx, xmlSecTransformHmacSha1Id) < 0) ||
+-			(xmlSecDSigCtxEnableSignatureTransform(dsigCtx, xmlSecTransformDsaSha1Id) < 0) ||
+-			(xmlSecDSigCtxEnableSignatureTransform(dsigCtx, xmlSecTransformRsaSha1Id) < 0) ||
+-			(xmlSecDSigCtxEnableSignatureTransform(dsigCtx, xmlSecTransformSha256Id) < 0) ||
+-			(xmlSecDSigCtxEnableSignatureTransform(dsigCtx, xmlSecTransformHmacSha256Id) < 0) ||
+-			(xmlSecDSigCtxEnableSignatureTransform(dsigCtx, xmlSecTransformRsaSha256Id) < 0) ||
+-			(xmlSecDSigCtxEnableSignatureTransform(dsigCtx, xmlSecTransformSha384Id) < 0) ||
+-			(xmlSecDSigCtxEnableSignatureTransform(dsigCtx, xmlSecTransformHmacSha384Id) < 0) ||
+-			(xmlSecDSigCtxEnableSignatureTransform(dsigCtx, xmlSecTransformRsaSha384Id) < 0) ||
+ 			(xmlSecDSigCtxEnableSignatureTransform(dsigCtx, xmlSecTransformSha512Id) < 0) ||
+ 			(xmlSecDSigCtxEnableSignatureTransform(dsigCtx, xmlSecTransformHmacSha512Id) < 0) ||
+ 			(xmlSecDSigCtxEnableSignatureTransform(dsigCtx, xmlSecTransformRsaSha512Id) < 0)
+@@ -1523,15 +1513,62 @@ lasso_saml_constrain_dsigctxt(xmlSecDSigCtxPtr dsigCtx) {
+ 		message(G_LOG_LEVEL_CRITICAL, "Error: failed to limit allowed signature transforms");
+ 		return FALSE;
+ 	}
++
++	if (lasso_get_min_signature_method() <= LASSO_SIGNATURE_METHOD_RSA_SHA384) {
++		if ((xmlSecDSigCtxEnableSignatureTransform(dsigCtx, xmlSecTransformSha384Id) < 0) ||
++			(xmlSecDSigCtxEnableSignatureTransform(dsigCtx, xmlSecTransformHmacSha384Id) < 0) ||
++			(xmlSecDSigCtxEnableSignatureTransform(dsigCtx, xmlSecTransformRsaSha384Id) < 0)) {
++
++			message(G_LOG_LEVEL_CRITICAL, "Error: failed to limit allowed sha384 signature transforms");
++			return FALSE;
++		}
++
++		if (xmlSecDSigCtxEnableReferenceTransform(dsigCtx, xmlSecTransformSha384Id) < 0) {
++
++			message(G_LOG_LEVEL_CRITICAL, "Error: failed to limit allowed sha384 reference transforms");
++			return FALSE;
++		}
++	}
++
++	if (lasso_get_min_signature_method() <= LASSO_SIGNATURE_METHOD_RSA_SHA256) {
++		if ((xmlSecDSigCtxEnableSignatureTransform(dsigCtx, xmlSecTransformSha256Id) < 0) ||
++			(xmlSecDSigCtxEnableSignatureTransform(dsigCtx, xmlSecTransformHmacSha256Id) < 0) ||
++			(xmlSecDSigCtxEnableSignatureTransform(dsigCtx, xmlSecTransformRsaSha256Id) < 0)) {
++
++			message(G_LOG_LEVEL_CRITICAL, "Error: failed to limit allowed sha256 signature transforms");
++			return FALSE;
++		}
++
++		if (xmlSecDSigCtxEnableReferenceTransform(dsigCtx, xmlSecTransformSha256Id) < 0) {
++
++			message(G_LOG_LEVEL_CRITICAL, "Error: failed to limit allowed sha256 reference transforms");
++			return FALSE;
++		}
++	}
++
++	if (lasso_get_min_signature_method() <= LASSO_SIGNATURE_METHOD_RSA_SHA1) {
++		if ((xmlSecDSigCtxEnableSignatureTransform(dsigCtx, xmlSecTransformSha1Id) < 0) ||
++			(xmlSecDSigCtxEnableSignatureTransform(dsigCtx, xmlSecTransformHmacSha1Id) < 0) ||
++			(xmlSecDSigCtxEnableSignatureTransform(dsigCtx, xmlSecTransformDsaSha1Id) < 0) ||
++			(xmlSecDSigCtxEnableSignatureTransform(dsigCtx, xmlSecTransformRsaSha1Id) < 0)) {
++
++			message(G_LOG_LEVEL_CRITICAL, "Error: failed to limit allowed sha1 signature transforms");
++			return FALSE;
++		}
++
++		if (xmlSecDSigCtxEnableReferenceTransform(dsigCtx, xmlSecTransformSha1Id) < 0) {
++
++			message(G_LOG_LEVEL_CRITICAL, "Error: failed to limit allowed sha1 reference transforms");
++			return FALSE;
++		}
++	}
++
+ 	if((xmlSecDSigCtxEnableReferenceTransform(dsigCtx, xmlSecTransformInclC14NId) < 0) ||
+ 			(xmlSecDSigCtxEnableReferenceTransform(dsigCtx, xmlSecTransformExclC14NId) < 0) ||
+ 			(xmlSecDSigCtxEnableSignatureTransform(dsigCtx, xmlSecTransformInclC14NWithCommentsId) < 0) ||
+ 			(xmlSecDSigCtxEnableSignatureTransform(dsigCtx, xmlSecTransformExclC14NWithCommentsId) < 0) ||
+ 			(xmlSecDSigCtxEnableSignatureTransform(dsigCtx, xmlSecTransformInclC14N11Id) < 0) ||
+ 			(xmlSecDSigCtxEnableSignatureTransform(dsigCtx, xmlSecTransformInclC14N11WithCommentsId) < 0) ||
+-			(xmlSecDSigCtxEnableReferenceTransform(dsigCtx, xmlSecTransformSha1Id) < 0) ||
+-			(xmlSecDSigCtxEnableReferenceTransform(dsigCtx, xmlSecTransformSha256Id) < 0) ||
+-			(xmlSecDSigCtxEnableReferenceTransform(dsigCtx, xmlSecTransformSha384Id) < 0) ||
+ 			(xmlSecDSigCtxEnableReferenceTransform(dsigCtx, xmlSecTransformSha512Id) < 0) ||
+ 			(xmlSecDSigCtxEnableReferenceTransform(dsigCtx, xmlSecTransformEnvelopedId) < 0)) {
+ 
+diff --git a/lasso/xml/xml.c b/lasso/xml/xml.c
+index 938844baf..f017ebbe3 100644
+--- a/lasso/xml/xml.c
++++ b/lasso/xml/xml.c
+@@ -91,6 +91,10 @@ GHashTable *dst_services_by_prefix = NULL; /* ID-WSF 1 extra DST services, index
+ GHashTable *idwsf2_dst_services_by_href = NULL; /* ID-WSF 2 DST services, indexed on href */
+ GHashTable *idwsf2_dst_services_by_prefix = NULL; /* ID-WSF 2 DST services, indexed on prefix */
+ 
++
++static LassoSignatureMethod default_signature_method = LASSO_SIGNATURE_METHOD_RSA_SHA1;
++static LassoSignatureMethod min_signature_method = LASSO_SIGNATURE_METHOD_RSA_SHA1;
++
+ /*****************************************************************************/
+ /* global methods                                                            */
+ /*****************************************************************************/
+@@ -3689,3 +3693,23 @@ lasso_node_new_from_saml2_query(const char *url_or_qs, const char *param_name, L
+ cleanup:
+ 	return result;
+ }
++
++LassoSignatureMethod
++lasso_get_default_signature_method() {
++	return default_signature_method;
++}
++
++void
++lasso_set_default_signature_method(LassoSignatureMethod meth) {
++	default_signature_method = meth;
++}
++
++LassoSignatureMethod
++lasso_get_min_signature_method() {
++	return min_signature_method;
++}
++
++void
++lasso_set_min_signature_method(LassoSignatureMethod meth) {
++	min_signature_method = meth;
++}
+diff --git a/lasso/xml/xml.h b/lasso/xml/xml.h
+index 7660a0647..d0d3e1b0d 100644
+--- a/lasso/xml/xml.h
++++ b/lasso/xml/xml.h
+@@ -116,6 +116,15 @@ typedef enum {
+ 	LASSO_SIGNATURE_METHOD_LAST
+ } LassoSignatureMethod;
+ 
++/* signature method and hash strength */
++LassoSignatureMethod lasso_get_default_signature_method();
++
++void lasso_set_default_signature_method(LassoSignatureMethod meth);
++
++LassoSignatureMethod lasso_get_min_signature_method();
++
++void lasso_set_min_signature_method(LassoSignatureMethod meth);
++
+ static inline gboolean
+ lasso_validate_signature_method(LassoSignatureMethod signature_method)
+ {
+diff --git a/tests/random_tests.c b/tests/random_tests.c
+index fa0367a3c..cf112c7e2 100644
+--- a/tests/random_tests.c
++++ b/tests/random_tests.c
+@@ -97,7 +97,7 @@ START_TEST(test01_server_new)
+ 	fail_unless(server->private_key != NULL);
+ 	fail_unless(server->private_key_password == NULL);
+ 	fail_unless(server->certificate != NULL);
+-	fail_unless(server->signature_method == LASSO_SIGNATURE_METHOD_RSA_SHA1);
++	fail_unless(server->signature_method == lasso_get_default_signature_method());
+ 	fail_unless(provider->ProviderID != NULL);
+ 	fail_unless(provider->role == 0);
+ 	fail_unless(g_file_get_contents(TESTSDATADIR "/idp1-la/metadata.xml", &content, &len, NULL));
+@@ -115,7 +115,7 @@ START_TEST(test01_server_new)
+ 	fail_unless(server->private_key != NULL);
+ 	fail_unless(server->private_key_password == NULL);
+ 	fail_unless(server->certificate != NULL);
+-	fail_unless(server->signature_method == LASSO_SIGNATURE_METHOD_RSA_SHA1);
++	fail_unless(server->signature_method == lasso_get_default_signature_method());
+ 	fail_unless(server->providers != NULL);
+ 	fail_unless(provider->ProviderID != NULL);
+ 	fail_unless(provider->role == 0, "provider->role != 0 => provider :=  %d", provider->role);
+@@ -143,7 +143,7 @@ START_TEST(test02_server_add_provider)
+ 	fail_unless(server->private_key != NULL);
+ 	fail_unless(! server->private_key_password);
+ 	fail_unless(server->certificate != NULL);
+-	fail_unless(server->signature_method == LASSO_SIGNATURE_METHOD_RSA_SHA1);
++	fail_unless(server->signature_method == lasso_get_default_signature_method());
+ 	fail_unless(server->providers != NULL);
+ 	lasso_server_add_provider(
+ 			server,
+-- 
+2.26.3
+
