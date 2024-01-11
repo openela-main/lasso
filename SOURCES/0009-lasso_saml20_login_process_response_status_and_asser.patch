@@ -1,0 +1,38 @@
+diff -up lasso-2.5.1/lasso/saml-2.0/login.c.coverity lasso-2.5.1/lasso/saml-2.0/login.c
+--- lasso-2.5.1/lasso/saml-2.0/login.c.coverity	2021-07-27 10:23:31.976845852 +0200
++++ lasso-2.5.1/lasso/saml-2.0/login.c	2021-07-27 10:23:55.358913123 +0200
+@@ -1371,7 +1371,7 @@ lasso_saml20_login_process_response_stat
+ 	char *status_value;
+ 	lasso_error_t rc = 0;
+ 	lasso_error_t assertion_signature_status = 0;
+-	LassoProfileSignatureVerifyHint verify_hint;
++	LassoProfileSignatureVerifyHint verify_hint = LASSO_PROFILE_SIGNATURE_VERIFY_HINT_LAST;
+ 
+ 	profile = &login->parent;
+ 	lasso_extract_node_or_fail(response, profile->response, SAMLP2_STATUS_RESPONSE,
+@@ -1492,20 +1492,12 @@ lasso_saml20_login_process_response_stat
+ 		lasso_assign_gobject (login->private_data->saml2_assertion, last_assertion);
+ 	}
+ 
+-	switch (verify_hint) {
+-		case LASSO_PROFILE_SIGNATURE_VERIFY_HINT_FORCE:
+-		case LASSO_PROFILE_SIGNATURE_VERIFY_HINT_MAYBE:
+-			break;
+-		case LASSO_PROFILE_SIGNATURE_VERIFY_HINT_IGNORE:
+-			/* ignore signature errors */
+-			if (rc == LASSO_PROFILE_ERROR_CANNOT_VERIFY_SIGNATURE) {
+-				rc = 0;
+-			}
+-			break;
+-		default:
+-			g_assert(0);
+-	}
+ cleanup:
++	if (verify_hint == LASSO_PROFILE_SIGNATURE_VERIFY_HINT_IGNORE &&
++		rc == LASSO_PROFILE_ERROR_CANNOT_VERIFY_SIGNATURE) {
++	    profile->signature_status = rc;
++	    rc = 0;
++	}
+ 	return rc;
+ }
+ 
