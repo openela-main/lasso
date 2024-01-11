@@ -1,0 +1,28 @@
+diff -up lasso-2.7.0/autogen.sh.noconfig lasso-2.7.0/autogen.sh
+--- lasso-2.7.0/autogen.sh.noconfig	2021-06-28 22:39:00.473005330 +0200
++++ lasso-2.7.0/autogen.sh	2021-06-28 22:39:43.028114738 +0200
+@@ -77,11 +77,6 @@ test $TEST_TYPE $FILE || {
+ 	exit 1
+ }
+ 
+-if test "$#" = 0; then
+-	echo "I am going to run ./configure with no arguments - if you wish "
+-        echo "to pass any to it, please specify them on the $0 command line."
+-fi
+-
+ # to support timj aclocal setup we are shipping gnome-doc-utils.m4
+ # and making sure automake picks it up ;)
+ # this is bad as -I prepends to the search path
+@@ -107,12 +102,3 @@ autoconf || exit $?
+ 
+ echo "* Running $AUTOMAKE"
+ $AUTOMAKE --add-missing -Wno-portability $am_opt || exit $?
+-
+-cd "$THEDIR"
+-
+-if [ "$1" != "noconfig" ]; then
+-	$srcdir/configure --enable-gtk-doc --enable-maintainer-mode "$@" || exit $?
+-fi
+-
+-echo
+-echo "Now type 'make install' to install $PROJECT."

@@ -1,0 +1,30 @@
+From f70eee9ef7faa9ccfb6f815977431ae2e02260bc Mon Sep 17 00:00:00 2001
+From: Jakub Hrozek <jhrozek@redhat.com>
+Date: Wed, 16 Jun 2021 12:23:47 +0200
+Subject: [PATCH 6/7] python: Skip the DSA key test unless SHA-1 is configured
+ (#54037)
+
+lasso supports DSA-XXX only with SHA-1. The alternative is to use
+DSA-SHA256.
+---
+ bindings/python/tests/profiles_tests.py | 4 ++++
+ 1 file changed, 4 insertions(+)
+
+diff --git a/bindings/python/tests/profiles_tests.py b/bindings/python/tests/profiles_tests.py
+index 6ec612077..501fd9199 100755
+--- a/bindings/python/tests/profiles_tests.py
++++ b/bindings/python/tests/profiles_tests.py
+@@ -276,6 +276,10 @@ class LoginTestCase(unittest.TestCase):
+ 
+     def test07(self):
+         '''SAMLv2 SSO with DSA key for the IdP'''
++        default_sign_meth = lasso.getDefaultSignatureMethod()
++        if default_sign_meth != lasso.SIGNATURE_METHOD_RSA_SHA1:
++            self.skipTest("This test requires that lasso is compiled with SHA1 as the default signature method")
++
+         sp = lasso.Server(
+             os.path.join(dataDir, 'sp5-saml2/metadata.xml'),
+             os.path.join(dataDir, 'sp5-saml2/private-key.pem'))
+-- 
+2.26.3
+

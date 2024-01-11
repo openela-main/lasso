@@ -1,0 +1,160 @@
+From f9a3aca0cb31a412faae25dd9fdbbf3fb61cb62f Mon Sep 17 00:00:00 2001
+From: Jakub Hrozek <jhrozek@redhat.com>
+Date: Tue, 15 Jun 2021 15:08:44 +0200
+Subject: [PATCH 5/7] Check if the signature method is allowed in addition to
+ being valid (#54037)
+
+Adds a new utility function lasso_allowed_signature_method() that checks
+if the signature method is allowed. Previously, the code would only
+check if the method was valid.
+
+This new function is used whenever lasso_validate_signature_method was
+previously used through lasso_ok_signature_method() which wraps both
+validate and allowed.
+
+lasso_allowed_signature_method() is also used on a couple of places,
+notably lasso_query_verify_helper().
+
+Related:
+https://dev.entrouvert.org/issues/54037
+---
+ lasso/id-ff/server.c     |  4 ++--
+ lasso/saml-2.0/profile.c |  4 ++--
+ lasso/xml/tools.c        | 11 ++++++++++-
+ lasso/xml/xml.c          |  5 +++--
+ lasso/xml/xml.h          | 13 +++++++++++++
+ 5 files changed, 30 insertions(+), 7 deletions(-)
+
+diff --git a/lasso/id-ff/server.c b/lasso/id-ff/server.c
+index 2bf5b7a8c..98a6c0214 100644
+--- a/lasso/id-ff/server.c
++++ b/lasso/id-ff/server.c
+@@ -909,7 +909,7 @@ lasso_server_get_signature_context_for_provider(LassoServer *server,
+ 		private_context = &provider->private_data->signature_context;
+ 	}
+ 
+-	if (private_context && lasso_validate_signature_method(private_context->signature_method)) {
++	if (private_context && lasso_ok_signature_method(private_context->signature_method)) {
+ 		lasso_assign_signature_context(*signature_context, *private_context);
+ 	} else {
+ 		rc = lasso_server_get_signature_context(server, signature_context);
+@@ -1014,7 +1014,7 @@ lasso_server_export_to_query_for_provider_by_name(LassoServer *server, const cha
+ 				provider_id, &context));
+ 	query = lasso_node_build_query(node);
+ 	goto_cleanup_if_fail_with_rc(query, LASSO_PROFILE_ERROR_BUILDING_QUERY_FAILED);
+-	if (lasso_validate_signature_method(context.signature_method)) {
++	if (lasso_ok_signature_method(context.signature_method)) {
+ 		lasso_assign_new_string(query, lasso_query_sign(query, context));
+ 	}
+ 	goto_cleanup_if_fail_with_rc(query,
+diff --git a/lasso/saml-2.0/profile.c b/lasso/saml-2.0/profile.c
+index 85f535ae0..412c391a6 100644
+--- a/lasso/saml-2.0/profile.c
++++ b/lasso/saml-2.0/profile.c
+@@ -1181,7 +1181,7 @@ lasso_saml20_profile_export_to_query(LassoProfile *profile, LassoNode *msg, char
+ 					"see #3.4.3 of saml-bindings-2.0-os");
+ 		}
+ 	}
+-	if (lasso_validate_signature_method(context.signature_method)) {
++	if (lasso_ok_signature_method(context.signature_method)) {
+ 		result = lasso_query_sign(unsigned_query, context);
+ 		goto_cleanup_if_fail_with_rc(result != NULL,
+ 				LASSO_PROFILE_ERROR_BUILDING_QUERY_FAILED);
+@@ -1219,7 +1219,7 @@ lasso_saml20_profile_build_http_redirect(LassoProfile *profile,
+ 	goto_cleanup_if_fail_with_rc (url != NULL, LASSO_PROFILE_ERROR_UNKNOWN_PROFILE_URL);
+ 	/* if message is signed, remove XML signature, add query signature */
+ 	lasso_assign_signature_context(context, lasso_node_get_signature(msg));
+-	if (lasso_validate_signature_method(context.signature_method)) {
++	if (lasso_ok_signature_method(context.signature_method)) {
+ 		lasso_node_remove_signature(msg);
+ 	}
+ 	lasso_check_good_rc(lasso_saml20_profile_export_to_query(profile, msg, &query, context));
+diff --git a/lasso/xml/tools.c b/lasso/xml/tools.c
+index cf6dade09..077b1134d 100644
+--- a/lasso/xml/tools.c
++++ b/lasso/xml/tools.c
+@@ -499,7 +499,7 @@ lasso_query_sign(char *query, LassoSignatureContext context)
+         lasso_error_t rc = 0;
+ 
+ 	g_return_val_if_fail(query != NULL, NULL);
+-	g_return_val_if_fail(lasso_validate_signature_method(context.signature_method), NULL);
++	g_return_val_if_fail(lasso_ok_signature_method(context.signature_method), NULL);
+ 
+ 	key = context.signature_key;
+ 	sign_method = context.signature_method;
+@@ -804,6 +804,12 @@ lasso_query_verify_helper(const char *signed_content, const char *b64_signature,
+ 	} else {
+ 		goto_cleanup_with_rc(LASSO_DS_ERROR_INVALID_SIGALG);
+ 	}
++
++	/* is the signature algo allowed */
++	goto_cleanup_if_fail_with_rc(
++                lasso_allowed_signature_method(method),
++                LASSO_DS_ERROR_INVALID_SIGALG);
++
+ 	/* decode signature */
+ 	signature = g_malloc(key_size+1);
+ 	goto_cleanup_if_fail_with_rc(
+@@ -2434,6 +2440,9 @@ _lasso_xmlsec_load_key_from_buffer(const char *buffer, size_t length, const char
+ 	};
+ 	xmlSecKey *private_key = NULL;
+ 
++	/* is the signature algo allowed */
++	goto_cleanup_if_fail(lasso_allowed_signature_method(signature_method));
++
+ 	xmlSecErrorsDefaultCallbackEnableOutput(FALSE);
+ 	switch (signature_method) {
+ 		case LASSO_SIGNATURE_METHOD_RSA_SHA1:
+diff --git a/lasso/xml/xml.c b/lasso/xml/xml.c
+index f017ebbe3..49574de68 100644
+--- a/lasso/xml/xml.c
++++ b/lasso/xml/xml.c
+@@ -824,7 +824,7 @@ lasso_legacy_extract_and_copy_signature_parameters(LassoNode *node, LassoNodeCla
+ 			node_data->sign_method_offset);
+ 	private_key_file = G_STRUCT_MEMBER(char *, node, node_data->private_key_file_offset);
+ 	certificate_file = G_STRUCT_MEMBER(char *, node, node_data->certificate_file_offset);
+-	if (! lasso_validate_signature_method(signature_method)) {
++	if (! lasso_ok_signature_method(signature_method)) {
+ 		return FALSE;
+ 	}
+ 	if (lasso_node_set_signature(node,
+@@ -1873,10 +1873,11 @@ lasso_node_impl_init_from_xml(LassoNode *node, xmlNode *xmlnode)
+ 			int what;
+ 			if (! lasso_get_integer_attribute(xmlnode, LASSO_SIGNATURE_METHOD_ATTRIBUTE,
+ 						BAD_CAST LASSO_LIB_HREF, &what,
+-						LASSO_SIGNATURE_METHOD_RSA_SHA1,
++						lasso_get_min_signature_method(),
+ 						LASSO_SIGNATURE_METHOD_LAST))
+ 				break;
+ 			method = what;
++
+ 			if (! lasso_get_integer_attribute(xmlnode, LASSO_SIGNATURE_METHOD_ATTRIBUTE,
+ 					BAD_CAST LASSO_LIB_HREF, &what, LASSO_SIGNATURE_TYPE_NONE+1,
+ 					LASSO_SIGNATURE_TYPE_LAST))
+diff --git a/lasso/xml/xml.h b/lasso/xml/xml.h
+index d0d3e1b0d..60c04eae5 100644
+--- a/lasso/xml/xml.h
++++ b/lasso/xml/xml.h
+@@ -132,6 +132,19 @@ lasso_validate_signature_method(LassoSignatureMethod signature_method)
+ 		&& signature_method < (LassoSignatureMethod)LASSO_SIGNATURE_METHOD_LAST;
+ }
+ 
++static inline gboolean
++lasso_allowed_signature_method(LassoSignatureMethod signature_method)
++{
++	return signature_method >= lasso_get_min_signature_method();
++}
++
++static inline gboolean
++lasso_ok_signature_method(LassoSignatureMethod signature_method)
++{
++	return lasso_validate_signature_method(signature_method) \
++	    && lasso_allowed_signature_method(signature_method);
++}
++
+ typedef struct _LassoNode LassoNode;
+ typedef struct _LassoNodeClass LassoNodeClass;
+ typedef struct _LassoNodeClassData LassoNodeClassData;
+-- 
+2.26.3
+
