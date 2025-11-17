@@ -59,7 +59,7 @@
 Summary: Liberty Alliance Single Sign On
 Name: lasso
 Version: 2.7.0
-Release: 11%{?dist}
+Release: 11%{?dist}.3
 License: GPLv2+
 URL: http://lasso.entrouvert.org/
 Source: http://dev.entrouvert.org/lasso/lasso-%{version}.tar.gz
@@ -97,6 +97,7 @@ Patch0006: 0006-python-Skip-the-DSA-key-test-unless-SHA-1-is-configu.patch
 Patch0007: 0007-test13_test_lasso_server_load_metadata-Don-t-verify-.patch
 Patch0008: autogen.noconfig
 Patch0009: 0009-lasso_saml20_login_process_response_status_and_asser.patch
+Patch0010: 0010-prevent_assignment_of_attribute_value_inside_any_attribut.patch
 
 %description
 Lasso is a library that implements the Liberty Alliance Single Sign On
@@ -323,13 +324,9 @@ rm -fr %{buildroot}%{_defaultdocdir}/%{name}
 %endif
 
 %changelog
-* Wed Nov 9 2022 Tomas Halman <thalman@redhat.com> - 2.7.0-11
-- Fixing changelog chronological order
-- Related: rhbz#2117590 - release python3-lasso pkg
-
-* Wed Nov 9 2022 Tomas Halman <thalman@redhat.com> - 2.7.0-10
-- Publishing python binding package
-- Resolves: rhbz#2117590 - release python3-lasso pkg
+* Fri Nov 14 2025 Tomas Halman <thalman@redhat.com>  - 2.7.0-11.3
+- Fix CVE-2025-47151 lasso: Type confusion in Entr'ouvert Lasso
+  Resolves: RHEL-126684
 
 * Mon Aug 16 2021 Jakub Hrozek <jhrozek@redhat.com> - 2.7.0-9
 - Bump the test timeout again
@@ -340,14 +337,14 @@ rm -fr %{buildroot}%{_defaultdocdir}/%{name}
 - Rebuilt for IMA sigs, glibc 2.34, aarch64 flags
   Related: rhbz#1991688
 
-* Thu Jul 29 2021 Jakub Hrozek <jhrozek@redhat.com> - 2.7.0-6
-- Resolves: rhbz#1984822 - lasso: FTBFS in test suite due to short test
-                           timeout (potentially OpenSSL-related)
-
 * Mon Jun 28 2021 Jakub Hrozek <jhrozek@redhat.com> - 2.7.0-7
 - Fix dead code issue
 - Resolves: rhbz#1966606: CVE-2021-28091 lasso: XML signature wrapping
                           vulnerability when parsing SAML responses
+
+* Thu Jul 29 2021 Jakub Hrozek <jhrozek@redhat.com> - 2.7.0-6
+- Resolves: rhbz#1984822 - lasso: FTBFS in test suite due to short test
+                           timeout (potentially OpenSSL-related)
 
 * Mon Jun 28 2021 Jakub Hrozek <jhrozek@redhat.com> - 2.7.0-5
 - Don't run configure twice
