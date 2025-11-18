@@ -1,0 +1,50 @@
+based on commit 8d12e6263fd6add923469bd5704e05a1ccfa8c69
+Author: Benjamin Dauvergne <bdauvergne@entrouvert.com>
+Date:   Thu May 15 15:44:58 2025 +0200
+
+    xml: prevent assignment of attribute value inside any attribute
+
+diff -up lasso-2.6.0/lasso/xml/misc_text_node.c.orig lasso-2.6.0/lasso/xml/misc_text_node.c
+--- lasso-2.6.0/lasso/xml/misc_text_node.c.orig	2017-12-22 18:18:37.545076317 +0100
++++ lasso-2.6.0/lasso/xml/misc_text_node.c	2025-11-14 17:21:38.831364473 +0100
+@@ -41,7 +41,7 @@ typedef struct {
+ static struct XmlSnippet schema_snippets[] = {
+ 	{ "content", SNIPPET_TEXT_CHILD,
+ 		G_STRUCT_OFFSET(LassoMiscTextNode, content), NULL, NULL, NULL},
+-	{ "any_attributes", SNIPPET_ATTRIBUTE | SNIPPET_ANY | SNIPPET_PRIVATE,
++	{ "", SNIPPET_ATTRIBUTE | SNIPPET_ANY | SNIPPET_PRIVATE,
+ 		G_STRUCT_OFFSET(LassoMiscTextNodePrivate, any_attributes), NULL, NULL, NULL},
+ 	{NULL, 0, 0, NULL, NULL, NULL}
+ };
+diff -up lasso-2.6.0/lasso/xml/saml-2.0/saml2_attribute_value.c.orig lasso-2.6.0/lasso/xml/saml-2.0/saml2_attribute_value.c
+--- lasso-2.6.0/lasso/xml/saml-2.0/saml2_attribute_value.c.orig	2017-12-22 18:18:37.545076317 +0100
++++ lasso-2.6.0/lasso/xml/saml-2.0/saml2_attribute_value.c	2025-11-14 17:21:38.832083737 +0100
+@@ -53,7 +53,7 @@ struct _LassoSaml2AttributeValuePrivate
+ static struct XmlSnippet schema_snippets[] = {
+ 	{ "any", SNIPPET_LIST_NODES | SNIPPET_ANY | SNIPPET_ALLOW_TEXT,
+ 		G_STRUCT_OFFSET(LassoSaml2AttributeValue, any), NULL, NULL, NULL},
+-	{ "any_attributes", SNIPPET_ATTRIBUTE | SNIPPET_ANY | SNIPPET_PRIVATE,
++	{ "", SNIPPET_ATTRIBUTE | SNIPPET_ANY | SNIPPET_PRIVATE,
+ 		G_STRUCT_OFFSET(struct _LassoSaml2AttributeValuePrivate, any_attributes), NULL,
+ 		NULL, NULL },
+ 	{NULL, 0, 0, NULL, NULL, NULL}
+diff -up lasso-2.6.0/lasso/xml/xml.c.orig lasso-2.6.0/lasso/xml/xml.c
+--- lasso-2.6.0/lasso/xml/xml.c.orig	2018-04-06 16:42:54.289732627 +0200
++++ lasso-2.6.0/lasso/xml/xml.c	2025-11-14 17:21:38.832869755 +0100
+@@ -1593,6 +1593,7 @@ lasso_node_impl_init_from_xml(LassoNode
+ 				type = snippet->type & 0xff;
+ 				/* assign attribute content if attribute has the same name as the
+ 				 * snippet and:
++				 * - the snippet is not the any attribute snippet,
+ 				 * - the snippet and the attribute have no namespace
+ 				 * - the snippet has no namespace but the attribute has the same
+ 				 *   namespace as the node
+@@ -1600,6 +1601,8 @@ lasso_node_impl_init_from_xml(LassoNode
+ 				 */
+ 				if (type != SNIPPET_ATTRIBUTE)
+ 					continue;
++				if (snippet->type & SNIPPET_ANY)
++					continue;
+ 				if (! lasso_strisequal((char*)attr->name, (char*)snippet->name))
+ 					continue;
+ 				if (attr->ns) {

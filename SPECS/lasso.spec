@@ -58,7 +58,7 @@
 Summary: Liberty Alliance Single Sign On
 Name: lasso
 Version: 2.6.0
-Release: 13%{?dist}
+Release: 14%{?dist}
 License: GPLv2+
 Group: System Environment/Libraries
 Source: http://dev.entrouvert.org/lasso/lasso-%{version}.tar.gz
@@ -72,6 +72,7 @@ Patch6: 0006-Fix-ECP-signature-not-found-error-when-only-assertio.patch
 Patch7: 0007-PAOS-Do-not-populate-Destination-attribute.patch
 Patch8: 0008-Fix-signature-checking-on-unsigned-response-with-mul.patch
 Patch9: 0009-lasso_saml20_login_process_response_status_and_asser.patch
+Patch10: 0010-prevent_assignment_of_attribute_value_inside_any_attribut.patch
 
 BuildRequires: libtool autoconf automake
 
@@ -209,6 +210,7 @@ library.
 %patch7 -p1
 %patch8 -p1
 %patch9 -p1
+%patch10 -p1
 
 # Remove any python script shebang lines (unless they refer to python3)
 sed -i -E -e '/^#![[:blank:]]*(\/usr\/bin\/env[[:blank:]]+python[^3]?\>)|(\/usr\/bin\/python[^3]?\>)/d' \
@@ -326,6 +328,10 @@ rm -fr %{buildroot}%{_defaultdocdir}/%{name}
 %endif
 
 %changelog
+* Fri Nov 14 2025 Tomas Halman <thalman@redhat.com> - 2.6.0-14
+- Fixing CVE-2025-47151
+  Resolves: RHEL-126687 CVE-2025-47151 lasso: Type confusion in Entr'ouvert Lasso
+
 * Wed May 4 2022 Tomas Halman <thalman@redhat.com> - 2.6.0-13
 - Publishing the python3-lasso binding
 - Resolves: rhbz#1888195 - Release python lasso package
