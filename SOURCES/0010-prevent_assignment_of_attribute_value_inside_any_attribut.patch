@@ -48,4 +48,3 @@ diff -up lasso-2.7.0/lasso/xml/xml.c.orig lasso-2.7.0/lasso/xml/xml.c
  				if (! lasso_strisequal((char*)attr->name, (char*)snippet->name))
  					continue;
  				if (attr->ns) {
-
